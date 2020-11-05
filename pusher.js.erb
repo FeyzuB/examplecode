@@ -1,0 +1,117 @@
+var pusher = initialize_pusher()
+
+// Subscribe to private-notification channel
+function initialize_pusher(){
+  return new Pusher("<%= ENV.fetch('PUSHER_API_KEY') %>", {
+    cluster: "<%= ENV.fetch('PUSHER_CLUSTER') %>",
+    authEndpoint: '/pusher/auth_private',
+    auth: {
+      headers: {
+        'X-CSRF-Token': $("meta[name=csrf-token]").attr("content")
+      }
+    }
+  })
+
+}
+
+function subscribeUserToConversation(conversation_id){
+  // NOTE: subscribe user to conversation channel if the user is active in that conversation. Otherwise do not subscribe him.
+  $.when(
+    $.ajax({
+      type: 'GET',
+      url: '/shared/conversations/is_conversation_user_active',
+      dataType: 'json',
+      data: {conversation_id: conversation_id, p_workspace_id: gon.workspace_id}
+    })
+  ).then(function(data){
+
+    // pusher.unsubscribe('presence-conversation-'+conversation_id+'');
+    var conversation = pusher.subscribe('presence-conversation-'+conversation_id+'');
+
+    conversation.bind('delete_member', function(data){
+      if (conversation.members.me.id == data.user_id) {
+        activeConversationUnsubscribe(data.conversation_id, data.conversation_user_id)
+      }
+    });
+
+    conversation.bind('add_member', function(data){
+      activeConversationSubscribe(data.conversation_id, data.conversation_user_id);
+    });
+
+    if (data == true) {
+      conversation.bind('new_message', function(data){
+        appendNewMessage(data, conversation.members.me.id)
+      });
+
+      conversation.bind('typing', function(data){
+        if (data["typer_user_id"] != conversation.members.me.id) {
+          var typingContainer = $('.partnie-messaging-typing')
+
+          if(!typingContainer.hasClass('isTyping')) {
+            typingContainer.addClass('isTyping');
+            typingContainer.find('span').text(data["typer_name"]);
+
+            var nameLength = typingContainer.find('span').width();
+            var typeSize = nameLength + 40 + 16;
+
+            typingContainer.css('width', typeSize);
+
+            setTimeout(function () {
+              typingContainer.removeClass('isTyping');
+            }, 7000);
+          }
+        };
+      });
+
+      conversation.bind('message_read', function(data) {
+        all_lis = $(".partnie-messaging-conversation-tab").find("li[id^='message_number']")
+
+        all_messages = []
+        $.each(all_lis, function(index, value) {
+          if ($(value).find(".isRead").length == 0) {
+            all_messages.push($(value).attr("id"))
+          }
+        });
+
+        if (all_messages.length != 0) {
+          $.ajax({
+            url: '/shared/conversations/'+data+'/messages/get_messages_read_status.js',
+            type: 'GET',
+            data: {conversation_id: data, messages: all_messages}
+          });
+        };
+
+      });
+    }
+    return;
+  });
+}
+
+function activeConversationUnsubscribe(conversation_id, conversation_user_id) {
+  pusher.unsubscribe('presence-conversation-'+conversation_id);
+  var form = $(".chat_content_conversation_user_"+conversation_user_id).find('form');
+
+  form.hide();
+  $('<div class="partnie-messaging-chat-leftChannel">\
+      <p class="fontWeight-Medium fontSize-14 color-kadett">\
+        Je kunt geen berichten sturen, omdat je geen deelnemer meer bent van deze chat.\
+      </p>\
+    </div>').insertAfter(form);
+}
+
+function activeConversationSubscribe(conversation_id, conversation_user_id) {
+  pusher.subscribe('presence-conversation-'+conversation_id);
+  var conversation = $(".chat_content_conversation_user_"+conversation_user_id);
+
+  conversation.find('form').show();
+  conversation.find('.partnie-messaging-chat-leftChannel').remove();
+}
+
+
+function conversationSubscribe() {
+
+}
+
+function conversationUnsubscribe() {
+
+}
